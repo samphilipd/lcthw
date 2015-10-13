@@ -14,7 +14,7 @@ end
 
 loop do
   if change == 0
-    puts "\n\n-----\n"
+    puts "-----\n"
     puts "found max args: #{arg_n}"
     break
   end
