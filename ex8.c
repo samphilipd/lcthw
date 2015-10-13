@@ -32,8 +32,8 @@ int main(int argc, char *argv[])
         char name_bad[] = { 'S', 'a', 'm'};
         printf("name without nul terminator: %s\n", name_bad);
 
-        printf("out of bounds access: %c\n", areas[1000]);
         printf("out of bounds access: %c\n", name[10]);
+        printf("out of bounds access: %c\n", areas[1000]);
 
         return 0;
 }
