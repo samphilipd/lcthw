@@ -4,18 +4,17 @@
 #include <errno.h> // what do we use from this?
 #include <string.h>
 
-#define MAX_DATA 32
-
 struct Address {
         int id;
         int set;
-        char name[MAX_DATA]; // pointer to string of known size
-        char email[MAX_DATA]; // pointer to string of known size
+        char *name; // pointer to string of unknown size
+        char *email; // pointer to string of unknown size
 };
 
 struct Database {
-        struct Address *addresses; // rows is a pointer to an array of Address structs
+        struct Address *addresses; // rows is a pointer to an array of Address structs of unknown size
         size_t max_rows; // the max number of rows
+        size_t max_str_len; // the max chars in a string
 };
 
 struct Connection {
@@ -28,8 +27,19 @@ void Database_close(struct Connection *conn)
         if (conn) {
                 if (conn->file)
                         fclose(conn->file);
-                if (conn->db)
-                        free(conn->db);
+                if (conn->db) {
+                    if (conn->db->addresses) {
+                        struct Address *address_ptr = conn->db->addresses;
+                        for (int i = 0; i < conn->db->max_rows; ++i) {
+                            free(address_ptr->name);
+                            free(address_ptr->email);
+                            ++address_ptr;
+                        }
+
+                        free(conn->db->addresses);
+                    }
+                    free(conn->db);
+                }
                 free(conn);
         }
 }
@@ -55,16 +65,29 @@ void Address_print(struct Address *addr)
 
 void Database_load(struct Connection *conn)
 {
-        int db_count = fread(&conn->db->max_rows, sizeof(size_t), 1, conn->file);
+        fread(&conn->db->max_rows, sizeof(size_t), 1, conn->file);
+        fread(&conn->db->max_str_len, sizeof(size_t), 1, conn->file);
+
         int row_count = conn->db->max_rows;
+        int strlen = conn->db->max_str_len;
 
-        struct Address *addresses = (struct Address *) malloc(sizeof(struct Address) * row_count);
-        int address_count = fread(addresses, sizeof(struct Address), row_count, conn->file);
+        struct Address *address = malloc(sizeof(struct Address) * row_count);
+        conn->db->addresses = address;
 
-        conn->db->addresses = addresses;
+        for (int i = 0; i < conn->db->max_rows; ++i) {
+            address->name = calloc(strlen, sizeof(char));
+            address->email = calloc(strlen, sizeof(char));
 
-        if (db_count != 1 || address_count != row_count)
-                die("Failed to load database.", conn);
+            fread(&address->id, sizeof(int), 1, conn->file);
+            fread(&address->set, sizeof(int), 1, conn->file);
+            fread(address->name, sizeof(char), strlen, conn->file);
+            fread(address->email, sizeof(char), strlen, conn->file);
+            ++address;
+        }
+
+
+        // if (db_count != 1)
+        //         die("Failed to load database.", conn);
 }
 
 struct Connection *Database_open(const char *filename, char mode)
@@ -98,25 +121,45 @@ void Database_write(struct Connection *conn)
         rewind(conn->file);
 
         // THIS IS TERRIBLE - better to write to plaintext/JSON
-        int db_count = fwrite(&conn->db->max_rows, sizeof(size_t), 1, conn->file);
-        int address_count = fwrite(conn->db->addresses, sizeof(struct Address), conn->db->max_rows, conn->file);
-        if (db_count != 1 || address_count != conn->db->max_rows)
-                die("Failed to write database.", conn);
+        fwrite(&conn->db->max_rows, sizeof(size_t), 1, conn->file);
+        fwrite(&conn->db->max_str_len, sizeof(size_t), 1, conn->file);
+
+        struct Address *address = conn->db->addresses;
+
+        size_t max_str_len = conn->db->max_str_len;
+
+        for (int i = 0; i < conn->db->max_rows; ++i) {
+            fwrite(&address->id, sizeof(int), 1, conn->file);
+            fwrite(&address->set, sizeof(int), 1, conn->file);
+            fwrite(address->name, sizeof(char), max_str_len, conn->file);
+            fwrite(address->email, sizeof(char), max_str_len, conn->file);
+            address++;
+        }
+
+        // if (db_count != 1)
+        //         die("Failed to write database.", conn);
 
         int rc = fflush(conn->file);
         if (rc == -1)
                 die("Cannot flush database.", conn);
 }
 
-void Database_create(struct Connection *conn, size_t max_rows)
+void Database_create(struct Connection *conn, size_t max_rows, size_t max_str_len)
 {
         conn->db->addresses = malloc(sizeof(struct Address) * max_rows);
         conn->db->max_rows = max_rows;
+        conn->db->max_str_len = max_str_len;
+
         for (int i = 0; i < max_rows; ++i) {
-                // make a prototype to initialize it
-                struct Address addr = {.id = i, .set = 0};
-                // then just assign it
-                conn->db->addresses[i] = addr;
+            // make a prototype to initialize it
+            struct Address addr = {
+                .id = i,
+                .set = 0
+            };
+            addr.name = calloc(max_str_len, sizeof(char));
+            addr.email = calloc(max_str_len, sizeof(char));
+            // then just assign it
+            conn->db->addresses[i] = addr;
         }
 }
 
@@ -127,12 +170,12 @@ void Database_set(struct Connection *conn, int id, const char *name, const char 
                 die("Already set, delete it first.", conn);
 
         addr->set = 1;
-        char *res = strncpy(addr->name, name, MAX_DATA); // WARNING: if the buffer fills, strncpy will NOT null-terminate it!
-        res[MAX_DATA] = '\0'; // always force the final null to terminate the string
+        char *res = strncpy(addr->name, name, conn->db->max_str_len); // WARNING: if the buffer fills, strncpy will NOT null-terminate it!
+        res[conn->db->max_str_len] = '\0'; // always force the final null to terminate the string
         if (!res)
                 die("Name copy failed", conn);
 
-        res = strncpy(addr->email, email, MAX_DATA);
+        res = strncpy(addr->email, email, conn->db->max_str_len);
         if (!res)
                 die("Email copy failed", conn);
 }
@@ -187,7 +230,8 @@ int main(int argc, char *argv[])
                         if (argc != 5)
                                 die("Need row_count, max_string_length to create", conn);
                         size_t max_rows = (size_t) (atoi(argv[3]));
-                        Database_create(conn, max_rows);
+                        size_t max_str_len = (size_t) (atoi(argv[4]));
+                        Database_create(conn, max_rows, max_str_len);
                         Database_write(conn);
                         break;
                 case 'g':
