@@ -215,6 +215,46 @@ void id_in_bounds(int id, struct Connection *conn)
         if (id >= conn->db->max_rows)
                 die("There's not that many records.", conn);
 }
+
+#define MESSAGE_LEN 100
+void Database_find_by_name(struct Connection *conn, char *find_name)
+{
+    unsigned found = 0;
+
+    for (int i = 0; i < conn->db->max_rows; ++i) {
+        struct Address *address = &conn->db->addresses[i];
+        if (strcmp(find_name, address->name) == 0) {
+            ++found;
+            Address_print(address);
+        }
+    }
+
+    if (found == 0) {
+        char *message = alloca(sizeof(char) * MESSAGE_LEN);
+        snprintf(message, MESSAGE_LEN, "Could not find record with name %s", find_name);
+        die(message, conn);
+    }
+}
+
+void Database_find_by_email(struct Connection *conn, char *find_email)
+{
+    unsigned found = 0;
+
+    for (int i = 0; i < conn->db->max_rows; ++i) {
+        struct Address *address = &conn->db->addresses[i];
+        if (strcmp(find_email, address->email) == 0) {
+            ++found;
+            Address_print(address);
+        }
+    }
+
+    if (found == 0) {
+        char *message = alloca(sizeof(char) * MESSAGE_LEN);
+        snprintf(message, MESSAGE_LEN, "Could not find record with email %s", find_email);
+        die(message, conn);
+    }
+}
+
 int main(int argc, char *argv[])
 {
         if (argc < 3)
@@ -226,43 +266,52 @@ int main(int argc, char *argv[])
         int id = 0;
 
         switch(action) {
-                case 'c':
-                        if (argc != 5)
-                                die("Need row_count, max_string_length to create", conn);
-                        size_t max_rows = (size_t) (atoi(argv[3]));
-                        size_t max_str_len = (size_t) (atoi(argv[4]));
-                        Database_create(conn, max_rows, max_str_len);
-                        Database_write(conn);
-                        break;
-                case 'g':
-                        id = atoi(argv[3]);
-                        id_in_bounds(id, conn);
-                        if (argc != 4)
-                                die("Need an id to get", conn);
-                        Database_get(conn, id);
-                        break;
-                case 's':
-                        id = atoi(argv[3]);
-                        id_in_bounds(id, conn);
-                        if (argc != 6)
-                                die("Need id, name, email to set", conn);
-                        Database_set(conn, id, argv[4], argv[5]);
-                        Database_write(conn);
-                        break;
-                case 'd':
-                        id = atoi(argv[3]);
-                        id_in_bounds(id, conn);
-                        if (argc != 4)
-                                die("Need id to delete", conn);
+            case 'c':
+                if (argc != 5)
+                    die("Need row_count, max_string_length to create", conn);
+                size_t max_rows = (size_t) (atoi(argv[3]));
+                size_t max_str_len = (size_t) (atoi(argv[4]));
+                Database_create(conn, max_rows, max_str_len);
+                Database_write(conn);
+                break;
+            case 'g':
+                id = atoi(argv[3]);
+                id_in_bounds(id, conn);
+                if (argc != 4)
+                    die("Need an id to get", conn);
+                Database_get(conn, id);
+                break;
+            case 's':
+                id = atoi(argv[3]);
+                id_in_bounds(id, conn);
+                if (argc != 6)
+                    die("Need id, name, email to set", conn);
+                Database_set(conn, id, argv[4], argv[5]);
+                Database_write(conn);
+                break;
+            case 'd':
+                id = atoi(argv[3]);
+                id_in_bounds(id, conn);
+                if (argc != 4)
+                    die("Need id to delete", conn);
 
-                        Database_delete(conn, id);
-                        Database_write(conn);
-                        break;
-                case 'l':
-                        Database_list(conn);
-                        break;
-                default:
-                        die("Invalid action, only: c=create, g=get, s=set, d=del, l=list", conn);
+                Database_delete(conn, id);
+                Database_write(conn);
+                break;
+            case 'l':
+                Database_list(conn);
+                break;
+            case 'f':
+                if (argc != 5)
+                    die("Need find_field [name or email], search_string", conn);
+                if (strcmp(argv[3], "name") == 0) {
+                    Database_find_by_name(conn, argv[4]);
+                } else if (strcmp(argv[3], "email") == 0) {
+                    Database_find_by_email(conn, argv[4]);
+                }
+                break;
+            default:
+                die("Invalid action, only: c=create, g=get, s=set, d=del, l=list", conn);
         }
 
         Database_close(conn);
